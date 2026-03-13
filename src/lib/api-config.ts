@@ -36,6 +36,21 @@ export const copilotHeaders = (state: State, vision: boolean = false) => {
   return headers
 }
 
+export const prepareSubagentHeaders = (
+  sessionId: string | undefined,
+  isSubagent: boolean,
+  headers: Record<string, string>,
+): void => {
+  if (isSubagent) {
+    headers["x-initiator"] = "agent"
+    headers["x-interaction-type"] = "conversation-subagent"
+  }
+
+  if (sessionId) {
+    headers["x-interaction-id"] = sessionId
+  }
+}
+
 export const GITHUB_API_BASE_URL = "https://api.github.com"
 export const githubHeaders = (state: State) => ({
   ...standardHeaders(),

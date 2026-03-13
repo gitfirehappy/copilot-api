@@ -1,6 +1,8 @@
 import consola from "consola"
 import { events } from "fetch-event-stream"
 
+import type { SubagentMarker } from "~/routes/messages/subagent-marker"
+
 import { copilotBaseUrl, copilotHeaders } from "~/lib/api-config"
 import { HTTPError } from "~/lib/error"
 import { state } from "~/lib/state"
@@ -325,16 +327,37 @@ export type CreateResponsesReturn = ResponsesResult | ResponsesStream
 interface ResponsesRequestOptions {
   vision: boolean
   initiator: "agent" | "user"
+  subagentMarker?: SubagentMarker | null
+  sessionId?: string
+}
+
+const applySubagentHeaders = (
+  sessionId: string | undefined,
+  isSubagent: boolean,
+  headers: Record<string, string>,
+): void => {
+  if (isSubagent) {
+    headers["x-initiator"] = "agent"
+    headers["x-interaction-type"] = "conversation-subagent"
+  }
+
+  if (sessionId) {
+    headers["x-interaction-id"] = sessionId
+  }
 }
 
 export const createResponses = async (
   payload: ResponsesPayload,
-  { vision, initiator }: ResponsesRequestOptions,
+  { vision, initiator, subagentMarker, sessionId }: ResponsesRequestOptions,
 ): Promise<CreateResponsesReturn> => {
-  const buildHeaders = () => ({
-    ...copilotHeaders(state, vision),
-    "X-Initiator": initiator,
-  })
+  const buildHeaders = () => {
+    const headers: Record<string, string> = {
+      ...copilotHeaders(state, vision),
+      "X-Initiator": initiator,
+    }
+    applySubagentHeaders(sessionId, Boolean(subagentMarker), headers)
+    return headers
+  }
 
   // service_tier is not supported by github copilot
   payload.service_tier = null

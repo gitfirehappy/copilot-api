@@ -6,6 +6,7 @@ import { streamSSE } from "hono/streaming"
 import { getMappedModel, getSmallModel } from "~/lib/config"
 import { createHandlerLogger } from "~/lib/logger"
 import { checkRateLimit } from "~/lib/rate-limit"
+import { getRootSessionId } from "~/lib/session"
 import { state } from "~/lib/state"
 import {
   buildErrorEvent,
@@ -40,6 +41,10 @@ import {
   translateToOpenAI,
 } from "./non-stream-translation"
 import { translateChunkToAnthropicEvents } from "./stream-translation"
+import {
+  parseSubagentMarkerFromFirstUser,
+  type SubagentMarker,
+} from "./subagent-marker"
 
 const logger = createHandlerLogger("messages-handler")
 
@@ -49,6 +54,14 @@ export async function handleCompletion(c: Context) {
   const anthropicPayload = await c.req.json<AnthropicMessagesPayload>()
   consola.info(`[Request] model: ${anthropicPayload.model}`)
   logger.debug("Anthropic request payload:", JSON.stringify(anthropicPayload))
+
+  const subagentMarker = parseSubagentMarkerFromFirstUser(anthropicPayload)
+  if (subagentMarker) {
+    logger.debug("Detected Subagent marker:", JSON.stringify(subagentMarker))
+  }
+
+  const sessionId = getRootSessionId(anthropicPayload, c)
+  logger.debug("Extracted session ID:", sessionId)
 
   // fix claude code 2.0.28+ warmup request consume premium request, forcing small model if no tools are used
   // set "CLAUDE_CODE_SUBAGENT_MODEL": "you small model" also can avoid this
@@ -74,14 +87,30 @@ export async function handleCompletion(c: Context) {
     return await handleWithMessagesApi(c, anthropicPayload, {
       anthropicBetaHeader: anthropicBeta,
       initiatorOverride: initiator,
+      subagentMarker,
+      sessionId,
     })
   }
 
   if (shouldUseResponsesApi(anthropicPayload.model)) {
-    return await handleWithResponsesApi(c, anthropicPayload, initiator)
+    return await handleWithResponsesApi(c, {
+      anthropicPayload,
+      initiatorOverride: initiator,
+      subagentOptions: {
+        subagentMarker,
+        sessionId,
+      },
+    })
   }
 
-  return await handleWithChatCompletions(c, anthropicPayload, initiator)
+  return await handleWithChatCompletions(c, {
+    anthropicPayload,
+    initiator,
+    subagentOptions: {
+      subagentMarker,
+      sessionId,
+    },
+  })
 }
 
 const RESPONSES_ENDPOINT = "/responses"
@@ -112,10 +141,22 @@ export const inferAnthropicInitiatorFromLastMessage = (
   return hasUnsupportedBlock ? "user" : "agent"
 }
 
+interface SubagentOptions {
+  subagentMarker: SubagentMarker | null
+  sessionId: string | undefined
+}
+
 const handleWithChatCompletions = async (
   c: Context,
-  anthropicPayload: AnthropicMessagesPayload,
-  initiator: "agent" | "user",
+  {
+    anthropicPayload,
+    initiator,
+    subagentOptions,
+  }: {
+    anthropicPayload: AnthropicMessagesPayload
+    initiator: "agent" | "user"
+    subagentOptions: SubagentOptions
+  },
 ) => {
   const openAIPayload = translateToOpenAI(anthropicPayload)
   logger.debug(
@@ -123,7 +164,11 @@ const handleWithChatCompletions = async (
     JSON.stringify(openAIPayload),
   )
 
-  const response = await createChatCompletions(openAIPayload, initiator)
+  const response = await createChatCompletions(openAIPayload, {
+    initiator,
+    subagentMarker: subagentOptions.subagentMarker,
+    sessionId: subagentOptions.sessionId,
+  })
 
   if (isNonStreaming(response)) {
     logger.debug(
@@ -174,8 +219,15 @@ const handleWithChatCompletions = async (
 
 const handleWithResponsesApi = async (
   c: Context,
-  anthropicPayload: AnthropicMessagesPayload,
-  initiatorOverride: "agent" | "user",
+  {
+    anthropicPayload,
+    initiatorOverride,
+    subagentOptions,
+  }: {
+    anthropicPayload: AnthropicMessagesPayload
+    initiatorOverride: "agent" | "user"
+    subagentOptions: SubagentOptions
+  },
 ) => {
   const responsesPayload =
     translateAnthropicMessagesToResponsesPayload(anthropicPayload)
@@ -188,6 +240,8 @@ const handleWithResponsesApi = async (
   const response = await createResponses(responsesPayload, {
     vision,
     initiator: initiatorOverride,
+    subagentMarker: subagentOptions.subagentMarker,
+    sessionId: subagentOptions.sessionId,
   })
 
   if (responsesPayload.stream && isAsyncIterable(response)) {
@@ -270,17 +324,22 @@ const handleWithMessagesApi = async (
   {
     anthropicBetaHeader,
     initiatorOverride,
+    subagentMarker,
+    sessionId,
   }: {
     anthropicBetaHeader: string | undefined
     initiatorOverride: "agent" | "user"
+    subagentMarker: SubagentMarker | null
+    sessionId: string | undefined
   },
 ) => {
   stripThinkingBlocks(anthropicPayload)
-  const response = await createMessages(
-    anthropicPayload,
+  const response = await createMessages(anthropicPayload, {
     anthropicBetaHeader,
     initiatorOverride,
-  )
+    subagentMarker,
+    sessionId,
+  })
 
   if (isAsyncIterable(response)) {
     logger.debug("Streaming response from Copilot (Messages API)")

@@ -5,6 +5,7 @@ import type {
   AnthropicMessagesPayload,
   AnthropicResponse,
 } from "~/routes/messages/anthropic-types"
+import type { SubagentMarker } from "~/routes/messages/subagent-marker"
 
 import { copilotBaseUrl, copilotHeaders } from "~/lib/api-config"
 import { HTTPError } from "~/lib/error"
@@ -27,10 +28,39 @@ function filterBetaHeader(header: string): string | undefined {
   return supported.length > 0 ? supported.join(",") : undefined
 }
 
+interface SubagentInfo {
+  subagentMarker: SubagentMarker | null
+  sessionId: string | undefined
+}
+
+interface CreateMessagesOptions extends SubagentInfo {
+  anthropicBetaHeader?: string
+  initiatorOverride?: "agent" | "user"
+}
+
+const applySubagentHeaders = (
+  sessionId: string | undefined,
+  isSubagent: boolean,
+  headers: Record<string, string>,
+): void => {
+  if (isSubagent) {
+    headers["x-initiator"] = "agent"
+    headers["x-interaction-type"] = "conversation-subagent"
+  }
+
+  if (sessionId) {
+    headers["x-interaction-id"] = sessionId
+  }
+}
+
 export const createMessages = async (
   payload: AnthropicMessagesPayload,
-  anthropicBetaHeader?: string,
-  initiatorOverride?: "agent" | "user",
+  options: CreateMessagesOptions = {
+    anthropicBetaHeader: undefined,
+    initiatorOverride: undefined,
+    sessionId: undefined,
+    subagentMarker: null,
+  },
 ): Promise<CreateMessagesReturn> => {
   const enableVision = payload.messages.some(
     (message) =>
@@ -48,7 +78,7 @@ export const createMessages = async (
     return hasUserInput ? "user" : "agent"
   }
 
-  const initiator = initiatorOverride ?? inferredInitiator()
+  const initiator = options.initiatorOverride ?? inferredInitiator()
 
   // Remove unsupported fields that Copilot API rejects
   // biome-ignore lint/performance/noDelete: cleaning up unsupported fields
@@ -61,12 +91,20 @@ export const createMessages = async (
     }
 
     const filteredBeta =
-      anthropicBetaHeader ? filterBetaHeader(anthropicBetaHeader) : undefined
+      options.anthropicBetaHeader ?
+        filterBetaHeader(options.anthropicBetaHeader)
+      : undefined
     if (filteredBeta) {
       headers["anthropic-beta"] = filteredBeta
     } else if (payload.thinking?.budget_tokens) {
       headers["anthropic-beta"] = "interleaved-thinking-2025-05-14"
     }
+
+    applySubagentHeaders(
+      options.sessionId,
+      Boolean(options.subagentMarker),
+      headers,
+    )
 
     return headers
   }
