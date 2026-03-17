@@ -1,16 +1,8 @@
-import consola from "consola"
 import { events } from "fetch-event-stream"
 
 import type { SubagentMarker } from "~/routes/messages/subagent-marker"
 
-import {
-  copilotHeaders,
-  copilotBaseUrl,
-  prepareSubagentHeaders,
-} from "~/lib/api-config"
-import { HTTPError } from "~/lib/error"
-import { state } from "~/lib/state"
-import { fetchCopilotWithRetry } from "~/services/copilot/request"
+import { copilotRequest } from "~/services/copilot-provider/create-provider"
 
 interface ChatCompletionsOptions {
   initiator?: "agent" | "user"
@@ -33,35 +25,14 @@ export const createChatCompletions = async (
     lastMessage !== undefined
     && (lastMessage.role === "assistant" || lastMessage.role === "tool")
 
-  const initiator = options.initiator ?? (isAgentCall ? "agent" : "user")
-
-  // Build headers and add X-Initiator
-  const buildHeaders = () => {
-    const headers: Record<string, string> = {
-      ...copilotHeaders(state, enableVision),
-      "X-Initiator": initiator,
-    }
-    prepareSubagentHeaders(
-      options.sessionId,
-      Boolean(options.subagentMarker),
-      headers,
-    )
-    return headers
-  }
-
-  const response = await fetchCopilotWithRetry({
-    url: `${copilotBaseUrl(state)}/chat/completions`,
-    init: {
-      method: "POST",
-      body: JSON.stringify(payload),
-    },
-    buildHeaders,
+  const response = await copilotRequest({
+    path: "/chat/completions",
+    body: payload,
+    vision: enableVision,
+    initiator: options.initiator ?? (isAgentCall ? "agent" : "user"),
+    subagentMarker: options.subagentMarker,
+    sessionId: options.sessionId,
   })
-
-  if (!response.ok) {
-    consola.error("Failed to create chat completions", response)
-    throw new HTTPError("Failed to create chat completions", response)
-  }
 
   if (payload.stream) {
     return events(response)

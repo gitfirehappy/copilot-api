@@ -12,7 +12,7 @@ export const getResponsesRequestOptions = (
   return { vision, initiator }
 }
 
-export const hasAgentInitiator = (payload: ResponsesPayload): boolean => {
+const hasAgentInitiator = (payload: ResponsesPayload): boolean => {
   // Refactor `isAgentCall` logic to check only the last message in the history rather than any message. This prevents valid user messages from being incorrectly flagged as agent calls due to previous assistant history, ensuring proper credit consumption for multi-turn conversations.
   const lastItem = getPayloadItems(payload).at(-1)
   if (!lastItem) {
@@ -26,7 +26,7 @@ export const hasAgentInitiator = (payload: ResponsesPayload): boolean => {
   return role === "assistant"
 }
 
-export const hasVisionInput = (payload: ResponsesPayload): boolean => {
+const hasVisionInput = (payload: ResponsesPayload): boolean => {
   const values = getPayloadItems(payload)
   return values.some((item) => containsVisionContent(item))
 }

@@ -1,4 +1,3 @@
-import consola from "consola"
 import { events } from "fetch-event-stream"
 
 import type {
@@ -7,10 +6,7 @@ import type {
 } from "~/routes/messages/anthropic-types"
 import type { SubagentMarker } from "~/routes/messages/subagent-marker"
 
-import { copilotBaseUrl, copilotHeaders } from "~/lib/api-config"
-import { HTTPError } from "~/lib/error"
-import { state } from "~/lib/state"
-import { fetchCopilotWithRetry } from "~/services/copilot/request"
+import { copilotRequest } from "~/services/copilot-provider/create-provider"
 
 export type MessagesStream = ReturnType<typeof events>
 export type CreateMessagesReturn = AnthropicResponse | MessagesStream
@@ -38,19 +34,19 @@ interface CreateMessagesOptions extends SubagentInfo {
   initiatorOverride?: "agent" | "user"
 }
 
-const applySubagentHeaders = (
-  sessionId: string | undefined,
-  isSubagent: boolean,
-  headers: Record<string, string>,
-): void => {
-  if (isSubagent) {
-    headers["x-initiator"] = "agent"
-    headers["x-interaction-type"] = "conversation-subagent"
+function buildBetaHeaders(
+  anthropicBetaHeader: string | undefined,
+  payload: AnthropicMessagesPayload,
+): Record<string, string> {
+  const headers: Record<string, string> = {}
+  const filteredBeta =
+    anthropicBetaHeader ? filterBetaHeader(anthropicBetaHeader) : undefined
+  if (filteredBeta) {
+    headers["anthropic-beta"] = filteredBeta
+  } else if (payload.thinking?.budget_tokens) {
+    headers["anthropic-beta"] = "interleaved-thinking-2025-05-14"
   }
-
-  if (sessionId) {
-    headers["x-interaction-id"] = sessionId
-  }
+  return headers
 }
 
 export const createMessages = async (
@@ -78,50 +74,19 @@ export const createMessages = async (
     return hasUserInput ? "user" : "agent"
   }
 
-  const initiator = options.initiatorOverride ?? inferredInitiator()
-
   // Remove unsupported fields that Copilot API rejects
   // biome-ignore lint/performance/noDelete: cleaning up unsupported fields
   delete (payload as unknown as Record<string, unknown>).context_management
 
-  const buildHeaders = () => {
-    const headers: Record<string, string> = {
-      ...copilotHeaders(state, enableVision),
-      "X-Initiator": initiator,
-    }
-
-    const filteredBeta =
-      options.anthropicBetaHeader ?
-        filterBetaHeader(options.anthropicBetaHeader)
-      : undefined
-    if (filteredBeta) {
-      headers["anthropic-beta"] = filteredBeta
-    } else if (payload.thinking?.budget_tokens) {
-      headers["anthropic-beta"] = "interleaved-thinking-2025-05-14"
-    }
-
-    applySubagentHeaders(
-      options.sessionId,
-      Boolean(options.subagentMarker),
-      headers,
-    )
-
-    return headers
-  }
-
-  const response = await fetchCopilotWithRetry({
-    url: `${copilotBaseUrl(state)}/v1/messages`,
-    init: {
-      method: "POST",
-      body: JSON.stringify(payload),
-    },
-    buildHeaders,
+  const response = await copilotRequest({
+    path: "/v1/messages",
+    body: payload,
+    vision: enableVision,
+    initiator: options.initiatorOverride ?? inferredInitiator(),
+    subagentMarker: options.subagentMarker,
+    sessionId: options.sessionId,
+    extraHeaders: buildBetaHeaders(options.anthropicBetaHeader, payload),
   })
-
-  if (!response.ok) {
-    consola.error("Failed to create messages", response)
-    throw new HTTPError("Failed to create messages", response)
-  }
 
   if (payload.stream) {
     return events(response)
