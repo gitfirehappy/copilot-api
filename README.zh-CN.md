@@ -172,6 +172,7 @@ docker run -d \
 - 在账户之间切换
 - 删除账户
 - 查看账户状态（个人/商业/企业）
+- 在 `Settings` 页面配置全局限流
 
 ## 环境变量
 
@@ -205,6 +206,8 @@ services:
 volumes:
   copilot-data:
 ```
+
+如果没有通过环境变量设置 `RATE_LIMIT` / `RATE_LIMIT_WAIT`，也可以在管理页的 `Settings` 标签中配置。环境变量优先级高于页面保存的配置。
 
 ## API 端点
 
@@ -295,6 +298,8 @@ volumes:
 | `extraPrompts` | 附加到系统消息的每模型提示 |
 | `smallModel` | 预热请求的备用模型（默认：`gpt-5-mini`） |
 | `modelReasoningEfforts` | 每模型推理强度（`none`、`minimal`、`low`、`medium`、`high`、`xhigh`） |
+| `rateLimitSeconds` | 当未设置 `RATE_LIMIT` 环境变量时，保存的全局最小请求间隔 |
+| `rateLimitWait` | 当未设置 `RATE_LIMIT_WAIT` 环境变量时，命中限流后的保存等待策略 |
 
 ## 开发
 
@@ -334,6 +339,14 @@ bun run knip
 - **速率限制**：使用 `RATE_LIMIT` 防止触发 GitHub 的速率限制。设置 `RATE_LIMIT_WAIT=true` 可以队列请求而不是返回错误。
 - **商业/企业账户**：账户类型在 OAuth 流程中自动检测。
 - **多账户**：通过 `/admin` 添加多个账户，并根据需要在它们之间切换。
+
+## Premium Interaction 说明
+
+- **`premium_interactions` 来自 Copilot/GitHub 上游计量，不是这个代理自行定义的计费模型。** `/usage` 端点只是透传并展示上游返回的使用量数据。
+- **Skill、hook、plan、subagent 等工作流可能会增加 `premium_interactions`。** 当客户端使用 Claude Code subagent 或 `superpowers` 一类能力时，Copilot 可能会把主交互和子代理交互视为不同的计费交互。
+- **预热请求也可能被上游计入。** 本项目已经尝试通过将部分 warmup 风格请求切到 `smallModel` 来降低影响，但无法完全控制 Copilot 的上游计量方式。
+- **这不是代理层可以彻底修复的问题。** 代理可以通过整理消息结构来尽量减少误计数，但无法覆盖 Copilot 在上游如何统计 interaction。
+- **如果使用 subagent 后看到计数增加，并不代表代理重复转发了同一条业务请求。** 在正常路径下，代理对选定的上游 endpoint 只会转发一次请求，但 Copilot 仍可能对整个工作流统计多个 interaction。
 
 ## CLAUDE.md 推荐内容
 

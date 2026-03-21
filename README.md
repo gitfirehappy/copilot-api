@@ -172,6 +172,7 @@ The admin panel allows you to:
 - Switch between accounts
 - Remove accounts
 - View account status (individual/business/enterprise)
+- Configure global rate limiting from the Settings tab
 
 ## Environment Variables
 
@@ -205,6 +206,8 @@ services:
 volumes:
   copilot-data:
 ```
+
+If `RATE_LIMIT` / `RATE_LIMIT_WAIT` are not set via environment variables, you can configure them from the admin page's `Settings` tab. Environment variables take precedence over the saved web settings.
 
 ## API Endpoints
 
@@ -295,6 +298,8 @@ The configuration file is stored at `/data/copilot-api/config.json` inside the c
 | `extraPrompts` | Per-model prompts appended to system messages |
 | `smallModel` | Fallback model for warmup requests (default: `gpt-5-mini`) |
 | `modelReasoningEfforts` | Per-model reasoning effort (`none`, `minimal`, `low`, `medium`, `high`, `xhigh`) |
+| `rateLimitSeconds` | Saved global minimum interval between requests when `RATE_LIMIT` env is not set |
+| `rateLimitWait` | Saved wait behavior when rate limit is hit and `RATE_LIMIT_WAIT` env is not set |
 
 ## Development
 
@@ -334,6 +339,14 @@ bun run knip
 - **Rate Limiting**: Use `RATE_LIMIT` to prevent hitting GitHub's rate limits. Set `RATE_LIMIT_WAIT=true` to queue requests instead of returning errors.
 - **Business/Enterprise Accounts**: The account type is automatically detected during OAuth flow.
 - **Multiple Accounts**: Add multiple accounts via `/admin` and switch between them as needed.
+
+## Premium Interaction Notes
+
+- **Premium interaction counts come from Copilot/GitHub, not from this proxy inventing its own billing model.** The `/usage` endpoint simply exposes the upstream Copilot usage data.
+- **Skill, hook, plan, and subagent workflows may increase `premium_interactions`.** When a client uses features such as Claude Code subagents or `superpowers`, Copilot may treat the parent interaction and subagent interaction as separate billable interactions.
+- **Warmup requests may also count upstream.** This project already tries to reduce the impact by routing some warmup-style requests to `smallModel`, but it cannot fully control how Copilot accounts for them.
+- **This is not fully fixable at the proxy layer.** The proxy can normalize some message shapes to reduce accidental over-counting, but it cannot override Copilot's upstream interaction accounting.
+- **If you see an increase while using subagents, that does not necessarily mean the proxy sent duplicate business requests.** In the normal request path, the proxy forwards a single upstream request per chosen endpoint, but Copilot may still count multiple interactions for the overall workflow.
 
 ## CLAUDE.md Recommended Content
 

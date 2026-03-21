@@ -337,6 +337,70 @@ adminRoutes.get("/api/model-mappings", (c) => {
   return c.json({ modelMapping: config.modelMapping ?? {} })
 })
 
+adminRoutes.get("/api/settings", (c) => {
+  const config = getConfig()
+  return c.json({
+    rateLimitSeconds: config.rateLimitSeconds ?? null,
+    rateLimitWait: config.rateLimitWait ?? false,
+    envOverride: {
+      rateLimitSeconds: process.env.RATE_LIMIT !== undefined,
+      rateLimitWait: process.env.RATE_LIMIT_WAIT !== undefined,
+    },
+  })
+})
+
+adminRoutes.put("/api/settings", async (c) => {
+  const body = await c.req.json<{
+    rateLimitSeconds?: number | null
+    rateLimitWait?: boolean
+  }>()
+
+  const rateLimitSeconds =
+    body.rateLimitSeconds === null || body.rateLimitSeconds === undefined ?
+      undefined
+    : body.rateLimitSeconds
+
+  if (
+    rateLimitSeconds !== undefined
+    && (!Number.isFinite(rateLimitSeconds) || rateLimitSeconds <= 0)
+  ) {
+    return c.json(
+      {
+        error: {
+          message: '"rateLimitSeconds" must be a number greater than 0',
+          type: "validation_error",
+        },
+      },
+      400,
+    )
+  }
+
+  const rateLimitWait = Boolean(body.rateLimitWait)
+  const config = getConfig()
+  await saveConfig({
+    ...config,
+    rateLimitSeconds,
+    rateLimitWait,
+  })
+
+  state.rateLimitSeconds =
+    process.env.RATE_LIMIT === undefined ?
+      rateLimitSeconds
+    : state.rateLimitSeconds
+  state.rateLimitWait =
+    process.env.RATE_LIMIT_WAIT === undefined ?
+      rateLimitWait
+    : state.rateLimitWait
+
+  return c.json({
+    success: true,
+    settings: {
+      rateLimitSeconds: rateLimitSeconds ?? null,
+      rateLimitWait,
+    },
+  })
+})
+
 adminRoutes.put("/api/model-mappings/:from", async (c) => {
   const from = c.req.param("from")
   const body = await c.req.json<{ to: string }>()

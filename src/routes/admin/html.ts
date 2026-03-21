@@ -134,6 +134,36 @@ export const adminHtml = `<!DOCTYPE html>
     .status-dot.online { background: #238636; }
     .refresh-btn { margin-left: auto; }
     .refresh-btn.loading svg { animation: spin 1s linear infinite; }
+    .form-grid { display: grid; gap: 1rem; }
+    .input {
+      width: 100%;
+      padding: 0.5rem;
+      border: 1px solid #30363d;
+      border-radius: 6px;
+      background: #21262d;
+      color: #c9d1d9;
+      font-size: 0.875rem;
+    }
+    .checkbox-row {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      padding: 0.75rem;
+      border: 1px solid #30363d;
+      border-radius: 6px;
+      background: #0d1117;
+    }
+    .checkbox-row input { width: 16px; height: 16px; }
+    .hint { color: #8b949e; font-size: 0.75rem; line-height: 1.5; }
+    .notice {
+      margin-top: 0.75rem;
+      padding: 0.75rem;
+      border-radius: 6px;
+      background: #0d1117;
+      border: 1px solid #30363d;
+      color: #8b949e;
+      font-size: 0.75rem;
+    }
   </style>
 </head>
 <body>
@@ -148,6 +178,7 @@ export const adminHtml = `<!DOCTYPE html>
     </div>
     <div class="tabs">
       <button class="tab active" data-tab="accounts">Accounts</button>
+      <button class="tab" data-tab="settings">Settings</button>
       <button class="tab" data-tab="models">Models</button>
       <button class="tab" data-tab="usage">Usage</button>
       <button class="tab" data-tab="model-mappings">Model Mappings</button>
@@ -174,6 +205,28 @@ export const adminHtml = `<!DOCTYPE html>
           </button>
         </div>
         <div class="models-grid" id="modelsList"><div class="empty-state">Loading models...</div></div>
+      </div>
+    </div>
+    <div class="tab-content" id="tab-settings">
+      <div class="card">
+        <div class="card-header">
+          <span class="card-title">Traffic Control</span>
+          <button class="btn btn-primary btn-sm" id="saveSettingsBtn">Save</button>
+        </div>
+        <div class="form-grid">
+          <div>
+            <label class="label" for="rateLimitSeconds">Rate Limit Seconds</label>
+            <input class="input" id="rateLimitSeconds" type="number" min="0" step="1" placeholder="Leave empty to disable">
+            <p class="hint">Minimum global interval between requests. Empty means disabled.</p>
+          </div>
+          <label class="checkbox-row" for="rateLimitWait">
+            <input id="rateLimitWait" type="checkbox">
+            <span>Wait instead of returning HTTP 429 when rate limit is hit</span>
+          </label>
+        </div>
+        <div class="notice" id="settingsNotice">
+          Loading settings...
+        </div>
       </div>
     </div>
     <div class="tab-content" id="tab-usage">
@@ -254,11 +307,64 @@ export const adminHtml = `<!DOCTYPE html>
         document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
         tab.classList.add('active');
         document.getElementById('tab-' + tab.dataset.tab).classList.add('active');
+        if (tab.dataset.tab === 'settings') fetchSettings();
         if (tab.dataset.tab === 'models') fetchModels();
         if (tab.dataset.tab === 'usage') fetchUsage();
         if (tab.dataset.tab === 'model-mappings') fetchMappings();
       });
     });
+    async function fetchSettings() {
+      try {
+        const res = await fetch(API_BASE + '/settings');
+        const data = await res.json();
+        document.getElementById('rateLimitSeconds').value = data.rateLimitSeconds ?? '';
+        document.getElementById('rateLimitWait').checked = Boolean(data.rateLimitWait);
+
+        const notices = [];
+        notices.push('This rate limit is process-wide, not per account or per client.');
+        if (data.envOverride?.rateLimitSeconds || data.envOverride?.rateLimitWait) {
+          const overrides = [];
+          if (data.envOverride.rateLimitSeconds) overrides.push('RATE_LIMIT');
+          if (data.envOverride.rateLimitWait) overrides.push('RATE_LIMIT_WAIT');
+          notices.push('Environment variables currently override: ' + overrides.join(', ') + '.');
+        } else {
+          notices.push('Saved values apply immediately and persist in config.json.');
+        }
+        document.getElementById('settingsNotice').textContent = notices.join(' ');
+      } catch (e) {
+        document.getElementById('settingsNotice').textContent = 'Failed to load settings.';
+      }
+    }
+    async function saveSettings() {
+      const btn = document.getElementById('saveSettingsBtn');
+      const rawValue = document.getElementById('rateLimitSeconds').value.trim();
+      const rateLimitSeconds = rawValue === '' ? null : Number(rawValue);
+      const rateLimitWait = document.getElementById('rateLimitWait').checked;
+
+      if (rawValue !== '' && (!Number.isFinite(rateLimitSeconds) || rateLimitSeconds <= 0)) {
+        alert('Rate limit seconds must be greater than 0, or left empty.');
+        return;
+      }
+
+      btn.disabled = true;
+      try {
+        const res = await fetch(API_BASE + '/settings', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ rateLimitSeconds, rateLimitWait })
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          alert(data.error?.message || 'Failed to save settings');
+          return;
+        }
+        await fetchSettings();
+      } catch (e) {
+        alert('Failed to save settings');
+      } finally {
+        btn.disabled = false;
+      }
+    }
     async function fetchAccounts() {
       try {
         const res = await fetch(API_BASE + '/accounts');
@@ -438,9 +544,11 @@ export const adminHtml = `<!DOCTYPE html>
     document.getElementById('startAuth').addEventListener('click', startAuth);
     document.getElementById('refreshModels').addEventListener('click', fetchModels);
     document.getElementById('refreshUsage').addEventListener('click', fetchUsage);
+    document.getElementById('saveSettingsBtn').addEventListener('click', saveSettings);
 
     fetchAccounts();
     fetchStatus();
+    fetchSettings();
 
     // Model Mappings
     async function fetchMappings() {
