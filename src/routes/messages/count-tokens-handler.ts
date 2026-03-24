@@ -8,6 +8,7 @@ import { getTokenCount } from "~/lib/tokenizer"
 
 import { type AnthropicMessagesPayload } from "./anthropic-types"
 import { translateToOpenAI } from "./non-stream-translation"
+import { sanitizeAnthropicPayload } from "./sanitize"
 
 /**
  * Handles token counting for Anthropic messages
@@ -17,6 +18,7 @@ export async function handleCountTokens(c: Context) {
     const anthropicBeta = c.req.header("anthropic-beta")
 
     const anthropicPayload = await c.req.json<AnthropicMessagesPayload>()
+    sanitizeAnthropicPayload(anthropicPayload)
 
     // Apply model mapping so count_tokens uses the same resolved model as /v1/messages
     const mappedModel = getMappedModel(anthropicPayload.model)

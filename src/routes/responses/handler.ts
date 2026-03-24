@@ -10,6 +10,7 @@ import {
   createResponses,
   type ResponsesPayload,
   type ResponsesResult,
+  type Tool,
 } from "~/services/copilot/create-responses"
 
 import { createStreamIdTracker, fixStreamIds } from "./stream-id-sync"
@@ -28,6 +29,14 @@ const FILE_EDITING_TOOL_NAMES = new Set([
   "multi_edit",
   "multiedit",
 ])
+
+interface CustomTool extends Record<string, unknown> {
+  type: "custom"
+  name: string
+  description?: string
+  input_schema?: Record<string, unknown>
+  parameters?: Record<string, unknown>
+}
 
 export const handleResponses = async (c: Context) => {
   await checkRateLimit(state)
@@ -156,15 +165,8 @@ const normalizeCustomTools = (payload: ResponsesPayload): void => {
   }
 }
 
-const isCustomTool = (
-  tool: ResponsesPayload["tools"] extends Array<infer T> ? T : never,
-): tool is {
-  type: "custom"
-  name: string
-  description?: string
-  input_schema?: Record<string, unknown>
-  parameters?: Record<string, unknown>
-} => tool.type === "custom" && typeof tool.name === "string"
+const isCustomTool = (tool: Tool): tool is CustomTool =>
+  tool.type === "custom" && typeof tool.name === "string"
 
 const getCustomToolParameters = (tool: {
   input_schema?: Record<string, unknown>

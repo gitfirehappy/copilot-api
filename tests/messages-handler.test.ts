@@ -6,6 +6,7 @@ import {
   inferAnthropicInitiatorFromLastMessage,
   sanitizeOrphanToolResults,
 } from "~/routes/messages/handler"
+import { sanitizeAnthropicPayload } from "~/routes/messages/sanitize"
 
 describe("sanitizeOrphanToolResults", () => {
   test("keeps tool_result when matching previous tool_use exists", () => {
@@ -132,5 +133,50 @@ describe("inferAnthropicInitiatorFromLastMessage", () => {
     }
 
     expect(inferAnthropicInitiatorFromLastMessage(payload)).toBe("user")
+  })
+})
+
+describe("sanitizeAnthropicPayload", () => {
+  test("keeps only standard anthropic tool fields", () => {
+    const payload = {
+      model: "claude-opus-4-6",
+      max_tokens: 1024,
+      messages: [{ role: "user", content: "hello" }],
+      context_management: { mode: "auto" },
+      tools: [
+        {
+          name: "edit_file",
+          description: "edit a file",
+          input_schema: {
+            type: "object",
+            properties: {
+              file_path: { type: "string" },
+            },
+          },
+          custom: {
+            eager_input_streaming: true,
+          },
+          extra_field: true,
+        },
+      ],
+    } as unknown as AnthropicMessagesPayload & {
+      context_management: Record<string, unknown>
+    }
+
+    sanitizeAnthropicPayload(payload)
+
+    expect("context_management" in payload).toBe(false)
+    expect(payload.tools).toEqual([
+      {
+        name: "edit_file",
+        description: "edit a file",
+        input_schema: {
+          type: "object",
+          properties: {
+            file_path: { type: "string" },
+          },
+        },
+      },
+    ])
   })
 })

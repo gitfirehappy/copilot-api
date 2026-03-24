@@ -6,6 +6,7 @@ import type {
 } from "~/routes/messages/anthropic-types"
 import type { SubagentMarker } from "~/routes/messages/subagent-marker"
 
+import { sanitizeAnthropicPayload } from "~/routes/messages/sanitize"
 import { copilotRequest } from "~/services/copilot-provider/create-provider"
 
 export type MessagesStream = ReturnType<typeof events>
@@ -74,9 +75,7 @@ export const createMessages = async (
     return hasUserInput ? "user" : "agent"
   }
 
-  // Remove unsupported fields that Copilot API rejects
-  // biome-ignore lint/performance/noDelete: cleaning up unsupported fields
-  delete (payload as unknown as Record<string, unknown>).context_management
+  sanitizeAnthropicPayload(payload)
 
   const response = await copilotRequest({
     path: "/v1/messages",

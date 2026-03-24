@@ -40,6 +40,7 @@ import {
   translateToAnthropic,
   translateToOpenAI,
 } from "./non-stream-translation"
+import { sanitizeAnthropicPayload } from "./sanitize"
 import { translateChunkToAnthropicEvents } from "./stream-translation"
 import {
   parseSubagentMarkerFromFirstUser,
@@ -54,6 +55,8 @@ export async function handleCompletion(c: Context) {
   const anthropicPayload = await c.req.json<AnthropicMessagesPayload>()
   consola.info(`[Request] model: ${anthropicPayload.model}`)
   logger.debug("Anthropic request payload:", JSON.stringify(anthropicPayload))
+
+  sanitizeAnthropicPayload(anthropicPayload)
 
   const subagentMarker = parseSubagentMarkerFromFirstUser(anthropicPayload)
   if (subagentMarker) {
