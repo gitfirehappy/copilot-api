@@ -14,6 +14,7 @@ services:
     volumes:
       # Persist account configuration
       - copilot-data:/data
+      - ./dist:/app/dist:ro
     environment:
       - PORT=4141
       # Optional: Enable verbose logging
