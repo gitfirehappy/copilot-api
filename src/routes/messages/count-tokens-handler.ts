@@ -2,11 +2,13 @@ import type { Context } from "hono"
 
 import consola from "consola"
 
+import { getMappedModel } from "~/lib/config"
 import { state } from "~/lib/state"
 import { getTokenCount } from "~/lib/tokenizer"
 
 import { type AnthropicMessagesPayload } from "./anthropic-types"
 import { translateToOpenAI } from "./non-stream-translation"
+import { sanitizeAnthropicPayload } from "./sanitize"
 
 /**
  * Handles token counting for Anthropic messages
@@ -16,11 +18,15 @@ export async function handleCountTokens(c: Context) {
     const anthropicBeta = c.req.header("anthropic-beta")
 
     const anthropicPayload = await c.req.json<AnthropicMessagesPayload>()
+    sanitizeAnthropicPayload(anthropicPayload)
+
+    // Apply model mapping so count_tokens uses the same resolved model as /v1/messages
+    const mappedModel = getMappedModel(anthropicPayload.model)
 
     const openAIPayload = translateToOpenAI(anthropicPayload)
 
     const selectedModel = state.models?.data.find(
-      (model) => model.id === anthropicPayload.model,
+      (model) => model.id === mappedModel,
     )
 
     if (!selectedModel) {

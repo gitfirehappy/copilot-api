@@ -1,3 +1,10 @@
 import config from "@echristian/eslint-config"
 
-export default config()
+const baseConfig = config()
+
+export default [
+  ...(Array.isArray(baseConfig) ? baseConfig : [baseConfig]),
+  {
+    ignores: ["claude-plugin/**", "copilot-api/**"],
+  },
+]

@@ -21,6 +21,8 @@ export interface AppConfig {
   >
   modelMapping?: Record<string, string>
   useFunctionApplyPatch?: boolean
+  rateLimitSeconds?: number
+  rateLimitWait?: boolean
   // Account management
   accounts?: Array<AccountConfig>
   activeAccountId?: string | null
@@ -43,6 +45,7 @@ const defaultConfig: AppConfig = {
     "gpt-5-mini": "low",
   },
   useFunctionApplyPatch: true,
+  rateLimitWait: false,
   accounts: [],
   activeAccountId: null,
 }

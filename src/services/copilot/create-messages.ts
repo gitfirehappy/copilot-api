@@ -1,15 +1,13 @@
-import consola from "consola"
 import { events } from "fetch-event-stream"
 
 import type {
   AnthropicMessagesPayload,
   AnthropicResponse,
 } from "~/routes/messages/anthropic-types"
+import type { SubagentMarker } from "~/routes/messages/subagent-marker"
 
-import { copilotBaseUrl, copilotHeaders } from "~/lib/api-config"
-import { HTTPError } from "~/lib/error"
-import { state } from "~/lib/state"
-import { fetchCopilotWithRetry } from "~/services/copilot/request"
+import { sanitizeAnthropicPayload } from "~/routes/messages/sanitize"
+import { copilotRequest } from "~/services/copilot-provider/create-provider"
 
 export type MessagesStream = ReturnType<typeof events>
 export type CreateMessagesReturn = AnthropicResponse | MessagesStream
@@ -27,10 +25,39 @@ function filterBetaHeader(header: string): string | undefined {
   return supported.length > 0 ? supported.join(",") : undefined
 }
 
+interface SubagentInfo {
+  subagentMarker: SubagentMarker | null
+  sessionId: string | undefined
+}
+
+interface CreateMessagesOptions extends SubagentInfo {
+  anthropicBetaHeader?: string
+  initiatorOverride?: "agent" | "user"
+}
+
+function buildBetaHeaders(
+  anthropicBetaHeader: string | undefined,
+  payload: AnthropicMessagesPayload,
+): Record<string, string> {
+  const headers: Record<string, string> = {}
+  const filteredBeta =
+    anthropicBetaHeader ? filterBetaHeader(anthropicBetaHeader) : undefined
+  if (filteredBeta) {
+    headers["anthropic-beta"] = filteredBeta
+  } else if (payload.thinking?.budget_tokens) {
+    headers["anthropic-beta"] = "interleaved-thinking-2025-05-14"
+  }
+  return headers
+}
+
 export const createMessages = async (
   payload: AnthropicMessagesPayload,
-  anthropicBetaHeader?: string,
-  initiatorOverride?: "agent" | "user",
+  options: CreateMessagesOptions = {
+    anthropicBetaHeader: undefined,
+    initiatorOverride: undefined,
+    sessionId: undefined,
+    subagentMarker: null,
+  },
 ): Promise<CreateMessagesReturn> => {
   const enableVision = payload.messages.some(
     (message) =>
@@ -48,42 +75,17 @@ export const createMessages = async (
     return hasUserInput ? "user" : "agent"
   }
 
-  const initiator = initiatorOverride ?? inferredInitiator()
+  sanitizeAnthropicPayload(payload)
 
-  // Remove unsupported fields that Copilot API rejects
-  // biome-ignore lint/performance/noDelete: cleaning up unsupported fields
-  delete (payload as unknown as Record<string, unknown>).context_management
-
-  const buildHeaders = () => {
-    const headers: Record<string, string> = {
-      ...copilotHeaders(state, enableVision),
-      "X-Initiator": initiator,
-    }
-
-    const filteredBeta =
-      anthropicBetaHeader ? filterBetaHeader(anthropicBetaHeader) : undefined
-    if (filteredBeta) {
-      headers["anthropic-beta"] = filteredBeta
-    } else if (payload.thinking?.budget_tokens) {
-      headers["anthropic-beta"] = "interleaved-thinking-2025-05-14"
-    }
-
-    return headers
-  }
-
-  const response = await fetchCopilotWithRetry({
-    url: `${copilotBaseUrl(state)}/v1/messages`,
-    init: {
-      method: "POST",
-      body: JSON.stringify(payload),
-    },
-    buildHeaders,
+  const response = await copilotRequest({
+    path: "/v1/messages",
+    body: payload,
+    vision: enableVision,
+    initiator: options.initiatorOverride ?? inferredInitiator(),
+    subagentMarker: options.subagentMarker,
+    sessionId: options.sessionId,
+    extraHeaders: buildBetaHeaders(options.anthropicBetaHeader, payload),
   })
-
-  if (!response.ok) {
-    consola.error("Failed to create messages", response)
-    throw new HTTPError("Failed to create messages", response)
-  }
 
   if (payload.stream) {
     return events(response)

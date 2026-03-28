@@ -138,10 +138,6 @@ sequenceDiagram
 ### Using Docker Compose (Recommended)
 
 ```bash
-# Clone the repository
-git clone https://github.com/yuegongzi/copilot-api.git
-cd copilot-api
-
 # Start the server
 docker compose up -d
 
@@ -176,6 +172,7 @@ The admin panel allows you to:
 - Switch between accounts
 - Remove accounts
 - View account status (individual/business/enterprise)
+- Configure global rate limiting from the Settings tab
 
 ## Environment Variables
 
@@ -210,6 +207,8 @@ volumes:
   copilot-data:
 ```
 
+If `RATE_LIMIT` / `RATE_LIMIT_WAIT` are not set via environment variables, you can configure them from the admin page's `Settings` tab. Environment variables take precedence over the saved web settings.
+
 ## API Endpoints
 
 ### OpenAI Compatible Endpoints
@@ -236,6 +235,17 @@ volumes:
 | `/usage` | `GET` | Copilot usage statistics and quota |
 | `/token` | `GET` | Current Copilot token |
 
+## Tool Support
+
+This project does not implement a full Claude Code / Codex tool protocol compatibility layer. Tool support is currently best-effort and limited to the tool shapes that GitHub Copilot accepts reliably.
+
+- **Well-supported**: standard `function` tools passed through OpenAI-compatible or Anthropic-compatible requests.
+- **Built-in Responses tools**: support exists for Copilot/OpenAI-style built-in tools such as `web_search`, `web_search_preview`, `file_search`, `code_interpreter`, `image_generation`, and `local_shell` when the upstream model/endpoint supports them.
+- **Special compatibility**: custom `apply_patch` is normalized into a `function` tool for better compatibility.
+- **Limited file editing compatibility**: common custom file-editing tool names such as `write`, `write_file`, `writefiles`, `edit`, `edit_file`, `multi_edit`, and `multiedit` are normalized into `function` tools so they are not dropped immediately by the proxy.
+- **Not guaranteed**: skill-specific tools used by Claude Code, Codex, `superpowers`, or other agent frameworks may still fail if they depend on client-specific schemas, result formats, or tool execution semantics that Copilot does not support upstream.
+- **Current limitation**: this proxy does not yet provide a complete end-to-end compatibility layer for all Claude Code or Codex file tools. If a skill depends on a proprietary tool contract, additional adapter work is still required.
+
 ## Using with Claude Code
 
 Configure Claude Code to use this proxy by creating a `.claude/settings.json` file:
@@ -244,11 +254,7 @@ Configure Claude Code to use this proxy by creating a `.claude/settings.json` fi
 {
   "env": {
     "ANTHROPIC_BASE_URL": "http://localhost:4141",
-    "ANTHROPIC_AUTH_TOKEN": "sk-xxxx",
-    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "claude-haiku-4.5",
-    "ANTHROPIC_DEFAULT_SONNET_MODEL": "claude-sonnet-4.5",
-    "ANTHROPIC_DEFAULT_OPUS_MODEL": "claude-opus-4.5",
-    "CLAUDE_CODE_SUBAGENT_MODEL": "claude-sonnet-4.5"
+    "ANTHROPIC_AUTH_TOKEN": "sk-xxxx"
   },
   "model": "opus",
   "permissions": {
@@ -256,6 +262,14 @@ Configure Claude Code to use this proxy by creating a `.claude/settings.json` fi
   }
 }
 ```
+
+### Configure Model Mappings in the Admin UI
+
+Model selection no longer needs to be hardcoded in `.claude/settings.json`. Open `/admin`, switch to the `Model Mappings` tab, and map Claude Code model aliases to the actual Copilot models you want to use.
+
+This is the recommended way to route `haiku`, `sonnet`, `opus`, dated Claude model IDs, or any other client-facing model name without changing local Claude Code settings each time.
+
+![Model mappings in the admin UI](docs/images/model-mappings.png)
 
 More options: [Claude Code settings](https://docs.anthropic.com/en/docs/claude-code/settings#environment-variables)
 
@@ -295,6 +309,8 @@ The configuration file is stored at `/data/copilot-api/config.json` inside the c
 | `extraPrompts` | Per-model prompts appended to system messages |
 | `smallModel` | Fallback model for warmup requests (default: `gpt-5-mini`) |
 | `modelReasoningEfforts` | Per-model reasoning effort (`none`, `minimal`, `low`, `medium`, `high`, `xhigh`) |
+| `rateLimitSeconds` | Saved global minimum interval between requests when `RATE_LIMIT` env is not set |
+| `rateLimitWait` | Saved wait behavior when rate limit is hit and `RATE_LIMIT_WAIT` env is not set |
 
 ## Development
 
@@ -334,6 +350,14 @@ bun run knip
 - **Rate Limiting**: Use `RATE_LIMIT` to prevent hitting GitHub's rate limits. Set `RATE_LIMIT_WAIT=true` to queue requests instead of returning errors.
 - **Business/Enterprise Accounts**: The account type is automatically detected during OAuth flow.
 - **Multiple Accounts**: Add multiple accounts via `/admin` and switch between them as needed.
+
+## Premium Interaction Notes
+
+- **Premium interaction counts come from Copilot/GitHub, not from this proxy inventing its own billing model.** The `/usage` endpoint simply exposes the upstream Copilot usage data.
+- **Skill, hook, plan, and subagent workflows may increase `premium_interactions`.** When a client uses features such as Claude Code subagents or `superpowers`, Copilot may treat the parent interaction and subagent interaction as separate billable interactions.
+- **Warmup requests may also count upstream.** This project already tries to reduce the impact by routing some warmup-style requests to `smallModel`, but it cannot fully control how Copilot accounts for them.
+- **This is not fully fixable at the proxy layer.** The proxy can normalize some message shapes to reduce accidental over-counting, but it cannot override Copilot's upstream interaction accounting.
+- **If you see an increase while using subagents, that does not necessarily mean the proxy sent duplicate business requests.** In the normal request path, the proxy forwards a single upstream request per chosen endpoint, but Copilot may still count multiple interactions for the overall workflow.
 
 ## CLAUDE.md Recommended Content
 

@@ -24,7 +24,7 @@ const PROXY_ENV = process.env.PROXY_ENV === "true"
 
 async function main(): Promise<void> {
   // Ensure config is merged with defaults at startup
-  mergeConfigWithDefaults()
+  const config = mergeConfigWithDefaults()
 
   if (PROXY_ENV) {
     initProxyFromEnv()
@@ -36,8 +36,11 @@ async function main(): Promise<void> {
     consola.info("Verbose logging enabled")
   }
 
-  state.rateLimitSeconds = RATE_LIMIT
-  state.rateLimitWait = RATE_LIMIT_WAIT
+  state.rateLimitSeconds = RATE_LIMIT ?? config.rateLimitSeconds
+  state.rateLimitWait =
+    process.env.RATE_LIMIT_WAIT === undefined ?
+      (config.rateLimitWait ?? false)
+    : RATE_LIMIT_WAIT
   state.showToken = SHOW_TOKEN
 
   await ensurePaths()

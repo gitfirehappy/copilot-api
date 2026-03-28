@@ -147,7 +147,7 @@ const getEncodeChatFunction = async (encoding: string): Promise<Encoder> => {
 /**
  * Get tokenizer type from model information
  */
-export const getTokenizerFromModel = (model: Model): string => {
+const getTokenizerFromModel = (model: Model): string => {
   return model.capabilities.tokenizer || "o200k_base"
 }
 
@@ -331,7 +331,7 @@ const calculateToolTokens = (
 /**
  * Calculate token count for tools based on model
  */
-export const numTokensForTools = (
+const numTokensForTools = (
   tools: Array<Tool>,
   encoder: Encoder,
   constants: ReturnType<typeof getModelConstants>,

@@ -1,10 +1,8 @@
-import consola from "consola"
 import { events } from "fetch-event-stream"
 
-import { copilotBaseUrl, copilotHeaders } from "~/lib/api-config"
-import { HTTPError } from "~/lib/error"
-import { state } from "~/lib/state"
-import { fetchCopilotWithRetry } from "~/services/copilot/request"
+import type { SubagentMarker } from "~/routes/messages/subagent-marker"
+
+import { copilotRequest } from "~/services/copilot-provider/create-provider"
 
 export interface ResponsesPayload {
   model: string
@@ -325,33 +323,25 @@ export type CreateResponsesReturn = ResponsesResult | ResponsesStream
 interface ResponsesRequestOptions {
   vision: boolean
   initiator: "agent" | "user"
+  subagentMarker?: SubagentMarker | null
+  sessionId?: string
 }
 
 export const createResponses = async (
   payload: ResponsesPayload,
-  { vision, initiator }: ResponsesRequestOptions,
+  { vision, initiator, subagentMarker, sessionId }: ResponsesRequestOptions,
 ): Promise<CreateResponsesReturn> => {
-  const buildHeaders = () => ({
-    ...copilotHeaders(state, vision),
-    "X-Initiator": initiator,
-  })
-
   // service_tier is not supported by github copilot
   payload.service_tier = null
 
-  const response = await fetchCopilotWithRetry({
-    url: `${copilotBaseUrl(state)}/responses`,
-    init: {
-      method: "POST",
-      body: JSON.stringify(payload),
-    },
-    buildHeaders,
+  const response = await copilotRequest({
+    path: "/responses",
+    body: payload,
+    vision,
+    initiator,
+    subagentMarker,
+    sessionId,
   })
-
-  if (!response.ok) {
-    consola.error("Failed to create responses", response)
-    throw new HTTPError("Failed to create responses", response)
-  }
 
   if (payload.stream) {
     return events(response)

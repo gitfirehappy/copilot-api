@@ -10,6 +10,7 @@ import {
   createResponses,
   type ResponsesPayload,
   type ResponsesResult,
+  type Tool,
 } from "~/services/copilot/create-responses"
 
 import { createStreamIdTracker, fixStreamIds } from "./stream-id-sync"
@@ -18,6 +19,24 @@ import { getResponsesRequestOptions } from "./utils"
 const logger = createHandlerLogger("responses-handler")
 
 const RESPONSES_ENDPOINT = "/responses"
+const FILE_EDITING_TOOL_NAMES = new Set([
+  "apply_patch",
+  "write",
+  "write_file",
+  "writefiles",
+  "edit",
+  "edit_file",
+  "multi_edit",
+  "multiedit",
+])
+
+interface CustomTool extends Record<string, unknown> {
+  type: "custom"
+  name: string
+  description?: string
+  input_schema?: Record<string, unknown>
+  parameters?: Record<string, unknown>
+}
 
 export const handleResponses = async (c: Context) => {
   await checkRateLimit(state)
@@ -27,7 +46,7 @@ export const handleResponses = async (c: Context) => {
 
   payload.model = getMappedModel(payload.model)
 
-  useFunctionApplyPatch(payload)
+  normalizeCustomTools(payload)
   filterUnsupportedTools(payload)
 
   const selectedModel = state.models?.data.find(
@@ -93,37 +112,100 @@ const isAsyncIterable = <T>(value: unknown): value is AsyncIterable<T> =>
 const isStreamingRequested = (payload: ResponsesPayload): boolean =>
   Boolean(payload.stream)
 
-const useFunctionApplyPatch = (payload: ResponsesPayload): void => {
+const normalizeCustomTools = (payload: ResponsesPayload): void => {
+  if (!Array.isArray(payload.tools)) {
+    return
+  }
+
   const config = getConfig()
   const useFunctionApplyPatch = config.useFunctionApplyPatch ?? true
-  if (useFunctionApplyPatch) {
-    logger.debug("Using function tool apply_patch for responses")
-    if (Array.isArray(payload.tools)) {
-      const toolsArr = payload.tools
-      for (let i = 0; i < toolsArr.length; i++) {
-        const t = toolsArr[i]
-        if (t.type === "custom" && t.name === "apply_patch") {
-          toolsArr[i] = {
-            type: "function",
-            name: t.name,
-            description: "Use the `apply_patch` tool to edit files",
-            parameters: {
-              type: "object",
-              properties: {
-                input: {
-                  type: "string",
-                  description: "The entire contents of the apply_patch command",
-                },
-              },
-              required: ["input"],
+  const toolsArr = payload.tools
+
+  for (let i = 0; i < toolsArr.length; i++) {
+    const tool = toolsArr[i]
+
+    if (!isCustomTool(tool)) {
+      continue
+    }
+
+    const toolName = tool.name.toLowerCase()
+    if (toolName === "apply_patch" && useFunctionApplyPatch) {
+      logger.debug("Converting custom apply_patch tool to function tool")
+      toolsArr[i] = {
+        type: "function",
+        name: tool.name,
+        description:
+          tool.description ?? "Use the `apply_patch` tool to edit files",
+        parameters: {
+          type: "object",
+          properties: {
+            input: {
+              type: "string",
+              description: "The entire contents of the apply_patch command",
             },
-            strict: false,
-          }
-        }
+          },
+          required: ["input"],
+        },
+        strict: false,
+      }
+      continue
+    }
+
+    if (FILE_EDITING_TOOL_NAMES.has(toolName)) {
+      logger.debug(
+        `Converting custom file editing tool to function tool: ${tool.name}`,
+      )
+      toolsArr[i] = {
+        type: "function",
+        name: tool.name,
+        description:
+          tool.description
+          ?? "Edit or write files in the local workspace and return a concise result.",
+        parameters: getCustomToolParameters(tool),
+        strict: false,
       }
     }
   }
 }
+
+const isCustomTool = (tool: Tool): tool is CustomTool =>
+  tool.type === "custom" && typeof tool.name === "string"
+
+const getCustomToolParameters = (tool: {
+  input_schema?: Record<string, unknown>
+  parameters?: Record<string, unknown>
+}): Record<string, unknown> =>
+  tool.parameters
+  ?? tool.input_schema ?? {
+    type: "object",
+    additionalProperties: true,
+    properties: {
+      file_path: {
+        type: "string",
+        description: "Path of the file to write or edit.",
+      },
+      content: {
+        type: "string",
+        description: "New file content for write operations.",
+      },
+      old_string: {
+        type: "string",
+        description: "Text to replace for edit operations.",
+      },
+      new_string: {
+        type: "string",
+        description: "Replacement text for edit operations.",
+      },
+      edits: {
+        type: "array",
+        description: "Batch edit instructions for multi-edit operations.",
+        items: {
+          type: "object",
+          additionalProperties: true,
+        },
+      },
+    },
+  }
 
 /**
  * Filter out unsupported tool types for Copilot API

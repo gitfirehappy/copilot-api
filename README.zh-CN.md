@@ -138,10 +138,6 @@ sequenceDiagram
 ### 使用 Docker Compose（推荐）
 
 ```bash
-# 克隆仓库
-git clone https://github.com/yuegongzi/copilot-api.git
-cd copilot-api
-
 # 启动服务器
 docker compose up -d
 
@@ -176,6 +172,7 @@ docker run -d \
 - 在账户之间切换
 - 删除账户
 - 查看账户状态（个人/商业/企业）
+- 在 `Settings` 页面配置全局限流
 
 ## 环境变量
 
@@ -210,6 +207,8 @@ volumes:
   copilot-data:
 ```
 
+如果没有通过环境变量设置 `RATE_LIMIT` / `RATE_LIMIT_WAIT`，也可以在管理页的 `Settings` 标签中配置。环境变量优先级高于页面保存的配置。
+
 ## API 端点
 
 ### OpenAI 兼容端点
@@ -236,6 +235,17 @@ volumes:
 | `/usage` | `GET` | Copilot 使用统计和配额 |
 | `/token` | `GET` | 当前 Copilot 令牌 |
 
+## 工具支持范围
+
+本项目当前没有实现完整的 Claude Code / Codex 工具协议兼容层。工具支持以“尽量兼容”为主，范围主要受 GitHub Copilot 上游可稳定接受的工具形态限制。
+
+- **明确支持**：通过 OpenAI 兼容或 Anthropic 兼容请求传入的标准 `function` 工具。
+- **Responses 内建工具**：已支持 Copilot/OpenAI 风格的内建工具，包括 `web_search`、`web_search_preview`、`file_search`、`code_interpreter`、`image_generation`、`local_shell`，前提是上游模型和 endpoint 本身支持。
+- **特殊兼容**：自定义 `apply_patch` 会被规范化为 `function` 工具，以提升兼容性。
+- **有限的文件编辑兼容**：常见自定义文件编辑工具名，如 `write`、`write_file`、`writefiles`、`edit`、`edit_file`、`multi_edit`、`multiedit`，会被规范化为 `function` 工具，避免在代理层被直接过滤掉。
+- **不保证兼容**：Claude Code、Codex、`superpowers` 或其他 agent 框架里的 skill 专用工具，如果依赖客户端自定义 schema、结果格式或特定执行语义，仍然可能失败，因为 Copilot 上游未必支持这些协议。
+- **当前限制**：本项目还没有提供完整的 Claude Code / Codex 文件工具端到端兼容层。如果某个 skill 依赖私有工具契约，仍然需要额外做适配。
+
 ## 与 Claude Code 配合使用
 
 通过创建 `.claude/settings.json` 文件来配置 Claude Code 使用此代理：
@@ -244,11 +254,7 @@ volumes:
 {
   "env": {
     "ANTHROPIC_BASE_URL": "http://localhost:4141",
-    "ANTHROPIC_AUTH_TOKEN": "sk-xxxx",
-    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "claude-haiku-4.5",
-    "ANTHROPIC_DEFAULT_SONNET_MODEL": "claude-sonnet-4.5",
-    "ANTHROPIC_DEFAULT_OPUS_MODEL": "claude-opus-4.5",
-    "CLAUDE_CODE_SUBAGENT_MODEL": "claude-sonnet-4.5"
+    "ANTHROPIC_AUTH_TOKEN": "sk-xxxx"
   },
   "model": "opus",
   "permissions": {
@@ -256,6 +262,14 @@ volumes:
   }
 }
 ```
+
+### 在管理页面配置模型映射
+
+现在不需要再把模型映射硬编码在 `.claude/settings.json` 里。打开 `/admin`，切换到 `Model Mappings` 页面后，即可把 Claude Code 使用的模型别名映射到实际的 Copilot 模型。
+
+这是目前更推荐的方式，适合统一管理 `haiku`、`sonnet`、`opus`、带日期的 Claude 模型 ID，以及其他客户端侧使用的模型名称，而不必反复修改本地 Claude Code 配置。
+
+![管理页面中的模型映射](docs/images/model-mappings.png)
 
 更多选项：[Claude Code 设置](https://docs.anthropic.com/en/docs/claude-code/settings#environment-variables)
 
@@ -295,6 +309,8 @@ volumes:
 | `extraPrompts` | 附加到系统消息的每模型提示 |
 | `smallModel` | 预热请求的备用模型（默认：`gpt-5-mini`） |
 | `modelReasoningEfforts` | 每模型推理强度（`none`、`minimal`、`low`、`medium`、`high`、`xhigh`） |
+| `rateLimitSeconds` | 当未设置 `RATE_LIMIT` 环境变量时，保存的全局最小请求间隔 |
+| `rateLimitWait` | 当未设置 `RATE_LIMIT_WAIT` 环境变量时，命中限流后的保存等待策略 |
 
 ## 开发
 
@@ -334,6 +350,14 @@ bun run knip
 - **速率限制**：使用 `RATE_LIMIT` 防止触发 GitHub 的速率限制。设置 `RATE_LIMIT_WAIT=true` 可以队列请求而不是返回错误。
 - **商业/企业账户**：账户类型在 OAuth 流程中自动检测。
 - **多账户**：通过 `/admin` 添加多个账户，并根据需要在它们之间切换。
+
+## Premium Interaction 说明
+
+- **`premium_interactions` 来自 Copilot/GitHub 上游计量，不是这个代理自行定义的计费模型。** `/usage` 端点只是透传并展示上游返回的使用量数据。
+- **Skill、hook、plan、subagent 等工作流可能会增加 `premium_interactions`。** 当客户端使用 Claude Code subagent 或 `superpowers` 一类能力时，Copilot 可能会把主交互和子代理交互视为不同的计费交互。
+- **预热请求也可能被上游计入。** 本项目已经尝试通过将部分 warmup 风格请求切到 `smallModel` 来降低影响，但无法完全控制 Copilot 的上游计量方式。
+- **这不是代理层可以彻底修复的问题。** 代理可以通过整理消息结构来尽量减少误计数，但无法覆盖 Copilot 在上游如何统计 interaction。
+- **如果使用 subagent 后看到计数增加，并不代表代理重复转发了同一条业务请求。** 在正常路径下，代理对选定的上游 endpoint 只会转发一次请求，但 Copilot 仍可能对整个工作流统计多个 interaction。
 
 ## CLAUDE.md 推荐内容
 

@@ -12,7 +12,7 @@ interface AccountsData {
 /**
  * Get accounts data from unified config
  */
-export function getAccountsSync(): AccountsData {
+function getAccountsSync(): AccountsData {
   const config = getConfig()
   return {
     activeAccountId: config.activeAccountId ?? null,
