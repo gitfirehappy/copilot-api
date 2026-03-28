@@ -7,7 +7,7 @@
 
 services:
   copilot-api:
-    build: .
+    image: ghcr.io/yuegongzi/copilot-api:latest
     container_name: copilot-api
     ports:
       - "4141:4141"
