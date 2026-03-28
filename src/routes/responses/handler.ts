@@ -33,8 +33,11 @@ export const handleResponses = async (c: Context) => {
   const selectedModel = state.models?.data.find(
     (model) => model.id === payload.model,
   )
+
   const supportsResponses =
-    selectedModel?.supported_endpoints?.includes(RESPONSES_ENDPOINT) ?? false
+    selectedModel?.supported_endpoints ?
+      selectedModel.supported_endpoints.includes(RESPONSES_ENDPOINT)
+    : selectedModel?.vendor === "OpenAI"
 
   if (!supportsResponses) {
     return c.json(

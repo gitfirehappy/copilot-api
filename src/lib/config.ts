@@ -171,6 +171,14 @@ export function getReasoningEffortForModel(
     return configuredEffort
   }
 
+  if (model.startsWith("gpt-5.4")) {
+    return "high"
+  }
+
+  if (model.startsWith("gpt-5.3")) {
+    return "high"
+  }
+
   if (model.startsWith("gpt-5.2")) {
     return "xhigh"
   }

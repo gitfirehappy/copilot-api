@@ -306,16 +306,28 @@ const handleWithMessagesApi = async (
 
 const shouldUseResponsesApi = (modelId: string): boolean => {
   const selectedModel = state.models?.data.find((model) => model.id === modelId)
-  return (
-    selectedModel?.supported_endpoints?.includes(RESPONSES_ENDPOINT) ?? false
-  )
+  if (!selectedModel) return false
+
+  // If supported_endpoints is explicitly provided, trust it
+  if (selectedModel.supported_endpoints) {
+    return selectedModel.supported_endpoints.includes(RESPONSES_ENDPOINT)
+  }
+
+  // Fallback: OpenAI/GPT models only support /responses, not /chat/completions
+  return selectedModel.vendor === "OpenAI"
 }
 
 const shouldUseMessagesApi = (modelId: string): boolean => {
   const selectedModel = state.models?.data.find((model) => model.id === modelId)
-  return (
-    selectedModel?.supported_endpoints?.includes(MESSAGES_ENDPOINT) ?? false
-  )
+  if (!selectedModel) return false
+
+  // If supported_endpoints is explicitly provided, trust it
+  if (selectedModel.supported_endpoints) {
+    return selectedModel.supported_endpoints.includes(MESSAGES_ENDPOINT)
+  }
+
+  // Fallback: Anthropic models use /v1/messages
+  return selectedModel.vendor === "Anthropic"
 }
 
 const isNonStreaming = (
